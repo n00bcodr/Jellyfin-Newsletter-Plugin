@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Mail;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Newsletters.Configuration;
@@ -39,6 +40,7 @@ public class HtmlBuilder
     private Logger logger;
     private SQLiteDatabase db;
     private JsonFileObj jsonHelper;
+    private Dictionary<string, string> embeddedImages;
 
     // Non-readonly
     private static string append = "Append";
@@ -52,6 +54,7 @@ public class HtmlBuilder
         db = new SQLiteDatabase();
         config = Plugin.Instance!.Configuration;
         emailBody = config.Body;
+        embeddedImages = new Dictionary<string, string>();
 
         newslettersDir = config.NewsletterDir; // newsletterdir
         Directory.CreateDirectory(newslettersDir);
@@ -95,21 +98,7 @@ public class HtmlBuilder
 
         logger.Debug($"Replace Value {replaceKey} with " + replaceValue);
 
-        // Dictionary<string, object> html_params = new Dictionary<string, object>();
-        // html_params.Add("{Date}", DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-        // html_params.Add(replaceKey, replaceValue);
-
         htmlObj = htmlObj.Replace(replaceKey, replaceValue.ToString(), StringComparison.Ordinal);
-        // logger.Debug("HERE\n " + htmlObj)
-
-        // foreach (KeyValuePair<string, object> param in html_params)
-        // {
-        //     if (param.Value is not null)
-        //     {
-        //         htmlObj = htmlObj.Replace(param.Key, param.Value.ToString(), StringComparison.Ordinal);
-        //         // logger.Debug("HERE\n " + htmlObj)
-        //     }
-        // }
         
         logger.Debug("New HTML OBJ: \n" + htmlObj);
         return htmlObj;
@@ -146,14 +135,21 @@ public class HtmlBuilder
                     }
 
                     var tmp_entry = config.Entry;
-                    // logger.Debug("TESTING");
-                    // logger.Debug(item.GetDict()["Filename"]);
 
                     foreach (KeyValuePair<string, object?> ele in item.GetReplaceDict())
                     {
                         if (ele.Value is not null)
                         {
-                            tmp_entry = this.TemplateReplace(tmp_entry, ele.Key, ele.Value);
+                            // Handle image embedding for email
+                            if (ele.Key == "{ImageURL}" && config.EmbedImages && config.PHType == "Embedded")
+                            {
+                                string embeddedImageId = EmbedImageForEmail(item.PosterPath, item.Title);
+                                tmp_entry = this.TemplateReplace(tmp_entry, ele.Key, $"cid:{embeddedImageId}");
+                            }
+                            else
+                            {
+                                tmp_entry = this.TemplateReplace(tmp_entry, ele.Key, ele.Value);
+                            }
                         }
                     }
 
@@ -173,6 +169,48 @@ public class HtmlBuilder
         }
 
         return builtHTMLString;
+    }
+
+    private string EmbedImageForEmail(string imagePath, string title)
+    {
+        if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+        {
+            logger.Warn($"Image not found for {title}: {imagePath}");
+            return "missing-image";
+        }
+
+        // Create a unique content ID for this image
+        string contentId = $"img_{title.Replace(" ", "_").Replace("'", "").Replace("\"", "")}_{Path.GetFileNameWithoutExtension(imagePath)}";
+        
+        // Store the mapping for later use when adding to email
+        if (!embeddedImages.ContainsKey(contentId))
+        {
+            embeddedImages[contentId] = imagePath;
+        }
+
+        return contentId;
+    }
+
+    public void AddEmbeddedImages(MailMessage mail)
+    {
+        foreach (var kvp in embeddedImages)
+        {
+            try
+            {
+                if (File.Exists(kvp.Value))
+                {
+                    var attachment = new Attachment(kvp.Value);
+                    attachment.ContentId = kvp.Key;
+                    attachment.ContentDisposition.Inline = true;
+                    mail.Attachments.Add(attachment);
+                    logger.Debug($"Added embedded image: {kvp.Key} -> {kvp.Value}");
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to embed image {kvp.Key}: {ex.Message}");
+            }
+        }
     }
 
     private string GetSeasonEpisodeHTML(List<NlDetailsJson> list)

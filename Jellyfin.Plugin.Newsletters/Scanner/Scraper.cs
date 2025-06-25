@@ -195,9 +195,17 @@ public class Scraper
                 currFileObj.OfficialRating = series.OfficialRating;
                 currFileObj.CommunityRating = series.CommunityRating;
 
+                // Check for quality upgrade duplicates
+                bool isQualityUpgrade = false;
+                if (config.PreventQualityUpgradeDuplicates)
+                {
+                    isQualityUpgrade = IsQualityUpgrade(currFileObj, series.Id.ToString("N"));
+                }
+
                 if (!InDatabase("CurrRunData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) && 
                     !InDatabase("CurrNewsletterData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) && 
-                    !InDatabase("ArchiveData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)))
+                    !InDatabase("ArchiveData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) &&
+                    !isQualityUpgrade)
                 {
                     try
                     {
@@ -285,12 +293,42 @@ public class Scraper
                         logger.Debug("Complete!");
                     }
                 }
+                else if (isQualityUpgrade)
+                {
+                    logger.Debug($"Skipping quality upgrade for: {currFileObj.Title}");
+                }
                 else
                 {
                     logger.Debug("\"" + currFileObj.Filename + "\" has already been processed either by Previous or Current Newsletter!");
                 }
             }
         }
+    }
+
+    private bool IsQualityUpgrade(JsonFileObj currFileObj, string itemId)
+    {
+        // Check if we already have this title/series in any of our databases
+        string sanitizedTitle = currFileObj.Title.Replace("'", string.Empty, StringComparison.Ordinal);
+        
+        // Check all databases for existing entries with the same ItemID
+        string[] tables = { "CurrRunData", "CurrNewsletterData", "ArchiveData" };
+        
+        foreach (string table in tables)
+        {
+            foreach (var row in db.Query($"SELECT COUNT(*) FROM {table} WHERE ItemID='{itemId}';"))
+            {
+                if (row is not null)
+                {
+                    if (int.Parse(row[0].ToString(), CultureInfo.CurrentCulture) > 0)
+                    {
+                        logger.Debug($"Found existing entry for ItemID {itemId} in {table} - treating as quality upgrade");
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        return false;
     }
 
     private JsonFileObj NoNull(JsonFileObj currFileObj)

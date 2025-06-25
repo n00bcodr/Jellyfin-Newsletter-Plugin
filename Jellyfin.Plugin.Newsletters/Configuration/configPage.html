@@ -56,6 +56,32 @@
                         </table>
                     </div>
 
+                    <!-- New Options -->
+                    <div id="AdditionalOptions">
+                        <h3>Additional Options</h3>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="PreventQualityUpgradeDuplicates" name="PreventQualityUpgradeDuplicates" type="checkbox" is="emby-checkbox" />
+                                <span>Prevent Quality Upgrade Duplicates</span>
+                            </label>
+                            <div class="fieldDescription">Prevents the same show/movie from appearing in newsletters when only quality is upgraded</div>
+                        </div>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="EmbedImages" name="EmbedImages" type="checkbox" is="emby-checkbox" />
+                                <span>Embed Images in Email</span>
+                            </label>
+                            <div class="fieldDescription">Embeds poster images directly in the email instead of linking to external sources</div>
+                        </div>
+                    </div>
+
+                    <!-- Preview Button -->
+                    <div style="margin: 20px 0;">
+                        <button id="previewButton" is="emby-button" type="button" class="raised block emby-button">
+                            <span>Preview Newsletter</span>
+                        </button>
+                    </div>
+
                     <!-- <div class="inputContainer" id="BodyTemplate" style="display: none;"> -->
                     <!-- Newsletter Formatting -->
                     <!-- Main Body -->
@@ -96,11 +122,17 @@
                             <div class="selectContainer">
                                 <label class="selectLabel" for="HostingSelector">Poster Hosting Type:</label>
                                 <select is="emby-select" id="HostingSelector" name="HostingSelector" class="emby-select-withcolor emby-select">
-                                    <option id="defaultImgur" value="Imgur">Imgur (Default)</option>
+                                    <option id="embeddedImages" value="Embedded">Embedded (Recommended)</option>
+                                    <option id="defaultImgur" value="Imgur">Imgur</option>
                                     <option id="localJFHosting" value="JfHosting">Local JF Hosting</option>
                                 </select>
                             </div>
                             <hr>
+                            <div id="Embedded" name="options">
+                                <div class="fieldDescription">
+                                    Images will be embedded directly in the email. This is the recommended option as it doesn't rely on external services and works offline.
+                                </div>
+                            </div>
                             <div id="Imgur" name="options">
                                 <div class="inputContainer" id="ImgurClientID">
                                     <label class="inputLabel inputLabelUnfocused" for="ApiKey">Imgur API Key:</label>
@@ -171,6 +203,10 @@
             #testButton {
                 background: #C1C1BF;
             }
+            #previewButton {
+                background: #4CAF50;
+                color: white;
+            }
             td {
                 padding-right: 10px;
             }
@@ -218,6 +254,9 @@
                     config.PHType = document.querySelector('#HostingSelector').value;
                     config.ApiKey = document.querySelector('#ApiKey').value;
                     config.Hostname = document.querySelector('#Hostname').value;
+                    //new options
+                    config.PreventQualityUpgradeDuplicates = document.querySelector('#PreventQualityUpgradeDuplicates').checked;
+                    config.EmbedImages = document.querySelector('#EmbedImages').checked;
 
                     ApiClient.updatePluginConfiguration(NewsletterConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
@@ -253,6 +292,9 @@
                     showScraperConfig(config.PHType);
                     document.querySelector('#ApiKey').value = config.ApiKey;
                     document.querySelector('#Hostname').value = config.Hostname;
+                    //new options
+                    document.querySelector('#PreventQualityUpgradeDuplicates').checked = config.PreventQualityUpgradeDuplicates || false;
+                    document.querySelector('#EmbedImages').checked = config.EmbedImages || false;
 
                     Dashboard.hideLoadingMsg();
                 });
@@ -292,6 +334,33 @@
                 Dashboard.hideLoadingMsg();
                 e.preventDefault();
                 alert("Test email sent!");
+                return false;
+            });
+
+            // button to preview newsletter
+            document.querySelector('#previewButton')
+                .addEventListener('click', function(e) {
+                Dashboard.showLoadingMsg();
+                console.log("Preview newsletter button pressed!");
+                
+                let url = ApiClient.getUrl('Smtp/PreviewNewsletter');
+                ApiClient.ajax({ 
+                    type: 'GET', 
+                    url: url,
+                    dataType: 'text'
+                }).then(function(html) {
+                    Dashboard.hideLoadingMsg();
+                    // Open preview in new window
+                    let previewWindow = window.open('', '_blank', 'width=800,height=600,scrollbars=yes');
+                    previewWindow.document.write(html);
+                    previewWindow.document.close();
+                }).catch(function(error) {
+                    Dashboard.hideLoadingMsg();
+                    console.error('Preview error:', error);
+                    alert('Error generating preview. Make sure you have scanned your library first.');
+                });
+                
+                e.preventDefault();
                 return false;
             });
 

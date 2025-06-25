@@ -56,55 +56,88 @@ public class PosterImageHandler
         {
             case "Imgur":
                 return UploadToImgur(item.PosterPath);
-                break;
             case "JfHosting":
                 return $"{config.Hostname}/Items/{item.ItemID}/Images/Primary";
-                break;
+            case "Embedded":
+                // For embedded images, we return the local path
+                // The actual embedding happens in the email builder
+                return item.PosterPath;
             default:
-                return "Something Went Wrong";
-                break;
+                logger.Warn("Unknown poster hosting type, defaulting to embedded");
+                return item.PosterPath;
         }
-
-        // return UploadToImgur(posterFilePath);
     }
 
     private string UploadToImgur(string posterFilePath)
     {
-        WebClient wc = new();
-
-        NameValueCollection values = new()
+        if (string.IsNullOrEmpty(config.ApiKey))
         {
-            { "image", Convert.ToBase64String(File.ReadAllBytes(posterFilePath)) }
-        };
+            logger.Error("Imgur API key is not configured!");
+            return "ERR_NO_API_KEY";
+        }
 
-        wc.Headers.Add("Authorization", "Client-ID " + config.ApiKey);
+        if (!File.Exists(posterFilePath))
+        {
+            logger.Error($"Poster file not found: {posterFilePath}");
+            return "ERR_FILE_NOT_FOUND";
+        }
 
         try
         {
-            byte[] response = wc.UploadValues("https://api.imgur.com/3/upload.xml", values);
+            using (WebClient wc = new WebClient())
+            {
+                NameValueCollection values = new NameValueCollection
+                {
+                    { "image", Convert.ToBase64String(File.ReadAllBytes(posterFilePath)) }
+                };
 
-            string res = System.Text.Encoding.Default.GetString(response);
+                wc.Headers.Add("Authorization", "Client-ID " + config.ApiKey);
 
-            logger.Debug("Imgur Response: " + res);
+                byte[] response = wc.UploadValues("https://api.imgur.com/3/upload.xml", values);
+                string res = System.Text.Encoding.Default.GetString(response);
 
-            logger.Info("Imgur Uploaded! Link:");
-            logger.Info(res.Split("<link>")[1].Split("</link>")[0]);
+                logger.Debug("Imgur Response: " + res);
 
-            return res.Split("<link>")[1].Split("</link>")[0];
+                if (res.Contains("<link>") && res.Contains("</link>"))
+                {
+                    string imageUrl = res.Split("<link>")[1].Split("</link>")[0];
+                    logger.Info("Imgur Uploaded! Link: " + imageUrl);
+                    return imageUrl;
+                }
+                else
+                {
+                    logger.Error("Unexpected Imgur response format");
+                    return "ERR_INVALID_RESPONSE";
+                }
+            }
         }
         catch (WebException e)
         {
-            logger.Debug("WebClient Return STATUS: " + e.Status);
-            logger.Debug(e.ToString().Split(")")[0].Split("(")[1]);
-            try
+            logger.Error("Imgur upload failed: " + e.Message);
+            
+            if (e.Response is HttpWebResponse response)
             {
-                return e.ToString().Split(")")[0].Split("(")[1];
+                logger.Debug($"HTTP Status: {response.StatusCode}");
+                
+                using (var reader = new StreamReader(e.Response.GetResponseStream()))
+                {
+                    string errorResponse = reader.ReadToEnd();
+                    logger.Debug($"Error response: {errorResponse}");
+                }
+
+                // Handle rate limiting
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return "429";
+                }
             }
-            catch (Exception ex)
-            {
-                logger.Error("Error caught while trying to parse webException error: " + ex);
-                return "ERR";
-            }
+
+            return "ERR";
+        }
+        catch (Exception ex)
+        {
+            logger.Error("Error during Imgur upload: " + ex.Message);
+            return "ERR";
         }
     }
 }

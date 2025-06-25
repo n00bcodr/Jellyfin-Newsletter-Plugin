@@ -101,8 +101,12 @@ public class PluginConfiguration : BasePluginConfiguration
         SeriesEnabled = true;
 
         // poster hosting
-        PHType = "Imgur";
+        PHType = "Embedded";
         Hostname = string.Empty;
+
+        // new options
+        PreventQualityUpgradeDuplicates = true;
+        EmbedImages = true;
     }
 
     /// <summary>
@@ -242,4 +246,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether Movies should be scanned.
     /// </summary>
     public bool MoviesEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to prevent quality upgrade duplicates.
+    /// </summary>
+    public bool PreventQualityUpgradeDuplicates { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to embed images in emails.
+    /// </summary>
+    public bool EmbedImages { get; set; }
 }
