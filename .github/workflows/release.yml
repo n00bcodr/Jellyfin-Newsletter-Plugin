@@ -94,65 +94,65 @@ jobs:
         echo "$CHANGELOG" > changelog.txt
         echo "CHANGELOG_FILE=changelog.txt" >> $GITHUB_OUTPUT
 
-    - name: Update manifest.json
-      run: |
-        VERSION="${{ steps.version.outputs.VERSION }}"
-        PLUGIN_ZIP_NAME=$(basename "$PLUGIN_ZIP")
-        CHECKSUM=$(md5sum "$PLUGIN_ZIP" | cut -d' ' -f1)
-        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    # - name: Update manifest.json
+    #   run: |
+    #     VERSION="${{ steps.version.outputs.VERSION }}"
+    #     PLUGIN_ZIP_NAME=$(basename "$PLUGIN_ZIP")
+    #     CHECKSUM=$(md5sum "$PLUGIN_ZIP" | cut -d' ' -f1)
+    #     TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-        # Read changelog
-        CHANGELOG_TEXT=$(cat changelog.txt | sed 's/"/\\"/g' | tr '\n' ' ')
+    #     # Read changelog
+    #     CHANGELOG_TEXT=$(cat changelog.txt | sed 's/"/\\"/g' | tr '\n' ' ')
 
-        # Create new version entry
-        NEW_VERSION=$(cat << EOF
-        {
-            "version": "$VERSION",
-            "changelog": "$CHANGELOG_TEXT",
-            "targetAbi": "10.9.0.0",
-            "sourceUrl": "https://github.com/Cloud9Developer/Jellyfin-Newsletter-Plugin/releases/download/v$VERSION/$PLUGIN_ZIP_NAME",
-            "checksum": "$CHECKSUM",
-            "timestamp": "$TIMESTAMP"
-        }
-        EOF
-        )
+    #     # Create new version entry
+    #     NEW_VERSION=$(cat << EOF
+    #     {
+    #         "version": "$VERSION",
+    #         "changelog": "$CHANGELOG_TEXT",
+    #         "targetAbi": "10.9.0.0",
+    #         "sourceUrl": "https://github.com/Cloud9Developer/Jellyfin-Newsletter-Plugin/releases/download/v$VERSION/$PLUGIN_ZIP_NAME",
+    #         "checksum": "$CHECKSUM",
+    #         "timestamp": "$TIMESTAMP"
+    #     }
+    #     EOF
+    #     )
 
-        # Update manifest.json by adding new version to the beginning of versions array
-        python3 << 'EOF'
-        import json
-        import os
+    #     # Update manifest.json by adding new version to the beginning of versions array
+    #     python3 << 'EOF'
+    #     import json
+    #     import os
 
-        version = os.environ['VERSION']
-        plugin_zip_name = os.path.basename(os.environ['PLUGIN_ZIP'])
-        checksum = os.environ['CHECKSUM']
-        timestamp = os.environ['TIMESTAMP']
+    #     version = os.environ['VERSION']
+    #     plugin_zip_name = os.path.basename(os.environ['PLUGIN_ZIP'])
+    #     checksum = os.environ['CHECKSUM']
+    #     timestamp = os.environ['TIMESTAMP']
 
-        with open('changelog.txt', 'r') as f:
-            changelog = f.read().strip()
+    #     with open('changelog.txt', 'r') as f:
+    #         changelog = f.read().strip()
 
-        # Load existing manifest
-        with open('manifest.json', 'r') as f:
-            manifest = json.load(f)
+    #     # Load existing manifest
+    #     with open('manifest.json', 'r') as f:
+    #         manifest = json.load(f)
 
-        # Create new version entry
-        new_version = {
-            "version": version,
-            "changelog": changelog,
-            "targetAbi": "10.9.0.0",
-            "sourceUrl": f"https://github.com/Cloud9Developer/Jellyfin-Newsletter-Plugin/releases/download/v{version}/{plugin_zip_name}",
-            "checksum": checksum,
-            "timestamp": timestamp
-        }
+    #     # Create new version entry
+    #     new_version = {
+    #         "version": version,
+    #         "changelog": changelog,
+    #         "targetAbi": "10.9.0.0",
+    #         "sourceUrl": f"https://github.com/Cloud9Developer/Jellyfin-Newsletter-Plugin/releases/download/v{version}/{plugin_zip_name}",
+    #         "checksum": checksum,
+    #         "timestamp": timestamp
+    #     }
 
-        # Add new version to the beginning of versions array
-        manifest[0]["versions"].insert(0, new_version)
+    #     # Add new version to the beginning of versions array
+    #     manifest[0]["versions"].insert(0, new_version)
 
-        # Write updated manifest
-        with open('manifest.json', 'w') as f:
-            json.dump(manifest, f, indent=4)
-        EOF
+    #     # Write updated manifest
+    #     with open('manifest.json', 'w') as f:
+    #         json.dump(manifest, f, indent=4)
+    #     EOF
 
-        echo "CHECKSUM=$CHECKSUM" >> $GITHUB_ENV
+    #     echo "CHECKSUM=$CHECKSUM" >> $GITHUB_ENV
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
