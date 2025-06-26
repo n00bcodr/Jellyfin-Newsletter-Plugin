@@ -54,90 +54,93 @@ public class PosterImageHandler
         logger.Debug($"HOSTING TYPE: {config.PHType}");
         switch (config.PHType)
         {
+            case "Embedded":
+                return GetEmbeddedImageData(item.PosterPath);
             case "Imgur":
                 return UploadToImgur(item.PosterPath);
             case "JfHosting":
                 return $"{config.Hostname}/Items/{item.ItemID}/Images/Primary";
-            case "Embedded":
-                // For embedded images, we return the local path
-                // The actual embedding happens in the email builder
-                return item.PosterPath;
             default:
-                logger.Warn("Unknown poster hosting type, defaulting to embedded");
-                return item.PosterPath;
+                return GetEmbeddedImageData(item.PosterPath);
         }
+    }
+
+    private string GetEmbeddedImageData(string posterFilePath)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(posterFilePath) || !File.Exists(posterFilePath))
+            {
+                logger.Warn($"Poster file not found: {posterFilePath}");
+                return string.Empty;
+            }
+
+            byte[] imageBytes = File.ReadAllBytes(posterFilePath);
+            string base64String = Convert.ToBase64String(imageBytes);
+
+            // Determine MIME type based on file extension
+            string mimeType = GetMimeType(posterFilePath);
+
+            return $"data:{mimeType};base64,{base64String}";
+        }
+        catch (Exception ex)
+        {
+            logger.Error($"Failed to embed image {posterFilePath}: {ex}");
+            return string.Empty;
+        }
+    }
+
+    private string GetMimeType(string filePath)
+    {
+        string extension = Path.GetExtension(filePath).ToLowerInvariant();
+        return extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            _ => "image/jpeg" // Default fallback
+        };
     }
 
     private string UploadToImgur(string posterFilePath)
     {
-        if (string.IsNullOrEmpty(config.ApiKey))
-        {
-            logger.Error("Imgur API key is not configured!");
-            return "ERR_NO_API_KEY";
-        }
+        WebClient wc = new();
 
-        if (!File.Exists(posterFilePath))
+        NameValueCollection values = new()
         {
-            logger.Error($"Poster file not found: {posterFilePath}");
-            return "ERR_FILE_NOT_FOUND";
-        }
+            { "image", Convert.ToBase64String(File.ReadAllBytes(posterFilePath)) }
+        };
+
+        wc.Headers.Add("Authorization", "Client-ID " + config.ApiKey);
 
         try
         {
-            using (WebClient wc = new WebClient())
-            {
-                NameValueCollection values = new NameValueCollection
-                {
-                    { "image", Convert.ToBase64String(File.ReadAllBytes(posterFilePath)) }
-                };
+            byte[] response = wc.UploadValues("https://api.imgur.com/3/upload.xml", values);
 
-                wc.Headers.Add("Authorization", "Client-ID " + config.ApiKey);
+            string res = System.Text.Encoding.Default.GetString(response);
 
-                byte[] response = wc.UploadValues("https://api.imgur.com/3/upload.xml", values);
-                string res = System.Text.Encoding.Default.GetString(response);
+            logger.Debug("Imgur Response: " + res);
 
-                logger.Debug("Imgur Response: " + res);
+            logger.Info("Imgur Uploaded! Link:");
+            logger.Info(res.Split("<link>")[1].Split("</link>")[0]);
 
-                if (res.Contains("<link>") && res.Contains("</link>"))
-                {
-                    string imageUrl = res.Split("<link>")[1].Split("</link>")[0];
-                    logger.Info("Imgur Uploaded! Link: " + imageUrl);
-                    return imageUrl;
-                }
-                else
-                {
-                    logger.Error("Unexpected Imgur response format");
-                    return "ERR_INVALID_RESPONSE";
-                }
-            }
+            return res.Split("<link>")[1].Split("</link>")[0];
         }
         catch (WebException e)
         {
-            logger.Error("Imgur upload failed: " + e.Message);
-            
-            if (e.Response is HttpWebResponse response)
+            logger.Debug("WebClient Return STATUS: " + e.Status);
+            logger.Debug(e.ToString().Split(")")[0].Split("(")[1]);
+            try
             {
-                logger.Debug($"HTTP Status: {response.StatusCode}");
-                
-                using (var reader = new StreamReader(e.Response.GetResponseStream()))
-                {
-                    string errorResponse = reader.ReadToEnd();
-                    logger.Debug($"Error response: {errorResponse}");
-                }
-
-                // Handle rate limiting
-                if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                {
-                    return "429";
-                }
+                return e.ToString().Split(")")[0].Split("(")[1];
             }
-
-            return "ERR";
-        }
-        catch (Exception ex)
-        {
-            logger.Error("Error during Imgur upload: " + ex.Message);
-            return "ERR";
+            catch (Exception ex)
+            {
+                logger.Error("Error caught while trying to parse webException error: " + ex);
+                return "ERR";
+            }
         }
     }
 }

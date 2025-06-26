@@ -32,9 +32,6 @@ public class Scraper
     // Global Vars
     // Readonly
     private readonly PluginConfiguration config;
-    // private readonly string currRunScanList;
-    // private readonly string archiveFile;
-    // private readonly string currNewsletterDataFile;
     private readonly ILibraryManager libManager;
 
     // Non-readonly
@@ -46,7 +43,6 @@ public class Scraper
     private Logger logger;
     private IProgress<double> progress;
     private CancellationToken cancelToken;
-    // private List<JsonFileObj> archiveObj;
 
     public Scraper(ILibraryManager libraryManager, IProgress<double> passedProgress, CancellationToken cancellationToken)
     {
@@ -168,8 +164,6 @@ public class Scraper
                     // NEW PARAMS
                     logger.Debug($"PremiereDate: {series.PremiereDate}"); // series PremiereDate
                     logger.Debug($"OfficialRating: " + series.OfficialRating); // TV-14, TV-PG, etc
-                    // logger.Info($"CriticRating: " + series.CriticRating);
-                    // logger.Info($"CustomRating: " + series.CustomRating);
                     logger.Debug($"CommunityRating: " + series.CommunityRating); // 8.5, 9.2, etc
                     logger.Debug($"RunTime: " + (int)((float)episode.RunTimeTicks! / 10000 / 60000) + " minutes");
                 }
@@ -195,17 +189,16 @@ public class Scraper
                 currFileObj.OfficialRating = series.OfficialRating;
                 currFileObj.CommunityRating = series.CommunityRating;
 
-                // Check for quality upgrade duplicates
-                bool isQualityUpgrade = false;
-                if (config.PreventQualityUpgradeDuplicates)
+                // Check for quality upgrade duplicates if enabled
+                if (config.PreventQualityUpgradeDuplicates && IsQualityUpgradeDuplicate(currFileObj))
                 {
-                    isQualityUpgrade = IsQualityUpgrade(currFileObj, series.Id.ToString("N"));
+                    logger.Debug($"Skipping quality upgrade duplicate: {currFileObj.Title}");
+                    continue;
                 }
 
-                if (!InDatabase("CurrRunData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) && 
-                    !InDatabase("CurrNewsletterData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) && 
-                    !InDatabase("ArchiveData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) &&
-                    !isQualityUpgrade)
+                if (!InDatabase("CurrRunData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) &&
+                    !InDatabase("CurrNewsletterData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)) &&
+                    !InDatabase("ArchiveData", currFileObj.Filename.Replace("'", string.Empty, StringComparison.Ordinal)))
                 {
                     try
                     {
@@ -285,17 +278,13 @@ public class Scraper
                                     "," + SanitizeDbItem(currFileObj.ItemID) +
                                     "," + SanitizeDbItem(currFileObj!.PosterPath) +
                                     "," + SanitizeDbItem(currFileObj.Type) +
-                                    "," + SanitizeDbItem(currFileObj!.PremiereYear) + 
+                                    "," + SanitizeDbItem(currFileObj!.PremiereYear) +
                                     "," + ((currFileObj?.RunTime is null) ? -1 : currFileObj.RunTime) +
                                     "," + SanitizeDbItem(currFileObj!.OfficialRating) +
                                     "," + ((currFileObj?.CommunityRating is null) ? -1 : currFileObj.CommunityRating) +
                                 ");");
                         logger.Debug("Complete!");
                     }
-                }
-                else if (isQualityUpgrade)
-                {
-                    logger.Debug($"Skipping quality upgrade for: {currFileObj.Title}");
                 }
                 else
                 {
@@ -305,29 +294,28 @@ public class Scraper
         }
     }
 
-    private bool IsQualityUpgrade(JsonFileObj currFileObj, string itemId)
+    private bool IsQualityUpgradeDuplicate(JsonFileObj currFileObj)
     {
-        // Check if we already have this title/series in any of our databases
-        string sanitizedTitle = currFileObj.Title.Replace("'", string.Empty, StringComparison.Ordinal);
-        
-        // Check all databases for existing entries with the same ItemID
+        // Check if we already have this title/season/episode combination in any database
+        string titleCheck = currFileObj.Title.Replace("'", string.Empty, StringComparison.Ordinal);
         string[] tables = { "CurrRunData", "CurrNewsletterData", "ArchiveData" };
-        
+
         foreach (string table in tables)
         {
-            foreach (var row in db.Query($"SELECT COUNT(*) FROM {table} WHERE ItemID='{itemId}';"))
+            string query = $"SELECT COUNT(*) FROM {table} WHERE Title='{titleCheck}' AND Season={currFileObj.Season} AND Episode={currFileObj.Episode};";
+
+            foreach (var row in db.Query(query))
             {
                 if (row is not null)
                 {
                     if (int.Parse(row[0].ToString(), CultureInfo.CurrentCulture) > 0)
                     {
-                        logger.Debug($"Found existing entry for ItemID {itemId} in {table} - treating as quality upgrade");
-                        return true;
+                        return true; // Found a duplicate
                     }
                 }
             }
         }
-        
+
         return false;
     }
 
@@ -434,7 +422,6 @@ public class Scraper
         logger.Debug("Uploading poster...");
         logger.Debug(currObj.ItemID);
         logger.Debug(currObj.PosterPath);
-        // return string.Empty;
         return imageHandler.FetchImagePoster(currObj);
     }
 
@@ -448,7 +435,6 @@ public class Scraper
 
     private string SanitizeDbItem(string unsanitized_string)
     {
-        // string sanitize_string = string.Empty;
         if (unsanitized_string is null)
         {
             unsanitized_string = string.Empty;

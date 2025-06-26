@@ -1,10 +1,10 @@
 #pragma warning disable 1591
 using System;
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Mail;
 using System.Text.RegularExpressions;
-using System.IO;
 using Jellyfin.Plugin.Newsletters.Configuration;
 using Jellyfin.Plugin.Newsletters.Emails.HTMLBuilder;
 using Jellyfin.Plugin.Newsletters.LOGGER;
@@ -13,21 +13,17 @@ using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-// using System.Net.NetworkCredential;
-
 namespace Jellyfin.Plugin.Newsletters.Emails.EMAIL;
 
 /// <summary>
 /// Interaction logic for SendMail.xaml.
 /// </summary>
-// [Route("newsletters/[controller]")]
 [Authorize(Policy = Policies.RequiresElevation)]
 [ApiController]
 [Route("Smtp")]
 public class Smtp : ControllerBase
 {
     private readonly PluginConfiguration config;
-    // private readonly string newsletterDataFile;
     private SQLiteDatabase db;
     private Logger logger;
 
@@ -36,65 +32,6 @@ public class Smtp : ControllerBase
         db = new SQLiteDatabase();
         logger = new Logger();
         config = Plugin.Instance!.Configuration;
-    }
-
-    [HttpGet("PreviewNewsletter")]
-    public IActionResult PreviewNewsletter()
-    {
-        try
-        {
-            db.CreateConnection();
-
-            if (NewsletterDbIsPopulated())
-            {
-                logger.Debug("Generating newsletter preview!");
-                
-                HtmlBuilder hb = new HtmlBuilder();
-                string body = hb.GetDefaultHTMLBody();
-                string builtString = hb.BuildDataHtmlStringFromNewsletterData();
-                builtString = hb.TemplateReplace(hb.ReplaceBodyWithBuiltString(body, builtString), "{ServerURL}", config.Hostname);
-                string currDate = DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-                builtString = builtString.Replace("{Date}", currDate, StringComparison.Ordinal);
-                
-                // Final cleanup
-                builtString = Regex.Replace(builtString, "{[A-za-z]*}", " ");
-                
-                return Content(builtString, "text/html");
-            }
-            else
-            {
-                string noDataHtml = @"
-                    <html>
-                    <body style='font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;'>
-                        <div style='background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                            <h2 style='color: #333;'>No Newsletter Data Available</h2>
-                            <p>There is no newsletter data to preview. Please run the 'Filesystem Scraper' scheduled task first to scan your library for new content.</p>
-                            <p>You can find this task in Dashboard > Scheduled Tasks > Newsletters > Filesystem Scraper</p>
-                        </div>
-                    </body>
-                    </html>";
-                return Content(noDataHtml, "text/html");
-            }
-        }
-        catch (Exception e)
-        {
-            logger.Error("An error has occurred during preview: " + e);
-            string errorHtml = $@"
-                <html>
-                <body style='font-family: Arial, sans-serif; padding: 20px; background-color: #f5f5f5;'>
-                    <div style='background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
-                        <h2 style='color: #d32f2f;'>Preview Error</h2>
-                        <p>An error occurred while generating the newsletter preview:</p>
-                        <pre style='background-color: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto;'>{e.Message}</pre>
-                    </div>
-                </body>
-                </html>";
-            return Content(errorHtml, "text/html");
-        }
-        finally
-        {
-            db.CloseConnection();
-        }
     }
 
     [HttpPost("SendTestMail")]
@@ -131,8 +68,6 @@ public class Smtp : ControllerBase
     }
 
     [HttpPost("SendSmtp")]
-    // [ProducesResponseType(StatusCodes.Status201Created)]
-    // [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public void SendEmail()
     {
         try
@@ -142,7 +77,6 @@ public class Smtp : ControllerBase
             if (NewsletterDbIsPopulated())
             {
                 logger.Debug("Sending out mail!");
-                // Smtp varsmtp = new Smtp();
                 MailMessage mail = new MailMessage();
                 string smtpAddress = config.SMTPServer;
                 int portNumber = config.SMTPPort;
@@ -152,14 +86,11 @@ public class Smtp : ControllerBase
                 string password = config.SMTPPass;
                 string emailToAddress = config.ToAddr;
                 string subject = config.Subject;
-                // string body;
 
                 HtmlBuilder hb = new HtmlBuilder();
 
                 string body = hb.GetDefaultHTMLBody();
                 string builtString = hb.BuildDataHtmlStringFromNewsletterData();
-                // string finalBody = hb.ReplaceBodyWithBuiltString(body, builtString);
-                // string finalBody = hb.TemplateReplace(hb.ReplaceBodyWithBuiltString(body, builtString), "{ServerURL}", config.Hostname);
                 builtString = hb.TemplateReplace(hb.ReplaceBodyWithBuiltString(body, builtString), "{ServerURL}", config.Hostname);
                 string currDate = DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                 builtString = builtString.Replace("{Date}", currDate, StringComparison.Ordinal);
@@ -170,18 +101,17 @@ public class Smtp : ControllerBase
                 mail.Body = Regex.Replace(builtString, "{[A-za-z]*}", " "); // Final cleanup
                 mail.IsBodyHtml = true;
 
+                // Handle embedded images if enabled
+                if (config.EmbedImages && config.PHType == "Embedded")
+                {
+                    ProcessEmbeddedImages(mail, builtString);
+                }
+
                 foreach (string email in emailToAddress.Split(','))
                 {
                     mail.Bcc.Add(email.Trim());
                 }
 
-                // Add embedded images if enabled
-                if (config.EmbedImages && config.PHType == "Embedded")
-                {
-                    hb.AddEmbeddedImages(mail);
-                }
-
-                // mail.Attachments.Add(new Attachment("D:\\TestFile.txt"));//--Uncomment this to send any attachment
                 SmtpClient smtp = new SmtpClient(smtpAddress, portNumber);
                 smtp.Credentials = new NetworkCredential(username, password);
                 smtp.EnableSsl = enableSSL;
@@ -201,6 +131,51 @@ public class Smtp : ControllerBase
         finally
         {
             db.CloseConnection();
+        }
+    }
+
+    private void ProcessEmbeddedImages(MailMessage mail, string htmlBody)
+    {
+        try
+        {
+            // Find all data: image URLs in the HTML
+            var dataImageRegex = new Regex(@"data:image/([^;]+);base64,([^""'>\s]+)", RegexOptions.IgnoreCase);
+            var matches = dataImageRegex.Matches(htmlBody);
+
+            int imageIndex = 0;
+            foreach (Match match in matches)
+            {
+                string mimeType = match.Groups[1].Value;
+                string base64Data = match.Groups[2].Value;
+                string contentId = $"image{imageIndex}";
+
+                try
+                {
+                    byte[] imageBytes = Convert.FromBase64String(base64Data);
+                    using (var stream = new MemoryStream(imageBytes))
+                    {
+                        var attachment = new Attachment(stream, contentId, $"image/{mimeType}");
+                        attachment.ContentDisposition.Inline = true;
+                        attachment.ContentId = contentId;
+                        mail.Attachments.Add(attachment);
+                    }
+
+                    // Replace the data URL with a cid reference
+                    string originalDataUrl = match.Value;
+                    string cidReference = $"cid:{contentId}";
+                    mail.Body = mail.Body.Replace(originalDataUrl, cidReference);
+                }
+                catch (Exception ex)
+                {
+                    logger.Error($"Failed to process embedded image {imageIndex}: {ex}");
+                }
+
+                imageIndex++;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Error($"Failed to process embedded images: {ex}");
         }
     }
 
